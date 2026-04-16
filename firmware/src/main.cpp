@@ -369,12 +369,12 @@ void connectMqttNonBlocking() {
           "{\"online\":false}",
           true)) {
     Serial.println(F("MQTT connected + subscribed"));
-    // Restart topicini QoS 0 bilan obuna — persistent session yo'q bo'lganda ham xavfsiz
-    // Empty retained → eski qolgan retained restart xabarini tozalaydi
+    // Empty retained → eski qolgan retained xabarlarni tozalaydi (boot loop oldini olish)
     mqttClient.publish(TOPIC_RESTART, (const uint8_t*)"", 0, true);
     mqttClient.loop();
     mqttClient.subscribe(TOPIC_RESTART, 0);
     mqttClient.subscribe(TOPIC_LIGHT_SET, 1);
+    // light/set retained — Telegram dan oxirgi buyruq saqlanadi, bu yerda uni qabul qilamiz
     mqttClient.subscribe(TOPIC_ARM_STATE, 1);
     mqttClient.subscribe(TOPIC_NIGHT_MODE_STATE, 1);
     mqttClient.loop();
