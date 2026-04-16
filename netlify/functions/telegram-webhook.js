@@ -37,20 +37,20 @@ async function handleCallback(query) {
   const action = query.data;
   let state = await getState();
 
-  const publish = async (topic, body, localPatch = {}) => {
-    const result = await mqttPublish(topic, body, { retain: false });
+  const publish = async (topic, body, localPatch = {}, mqttOptions = {}) => {
+    const result = await mqttPublish(topic, body, { retain: false, ...mqttOptions });
     state = await setState({ ...localPatch, lastLatencyMs: result.latencyMs });
     return result;
   };
 
   switch (action) {
     case CALLBACKS.LIGHT_ON:
-      await publish(TOPICS.lightSet, { on: true, source: "telegram" }, { lightOn: true });
+      await publish(TOPICS.lightSet, { on: true, source: "telegram" }, { lightOn: true }, { retain: true });
       await appendLog({ type: "light", message: "Light turned ON from Telegram" });
       await editDashboard(chatId, messageId, `✅ Light ON\n\n${statusText(state)}`);
       break;
     case CALLBACKS.LIGHT_OFF:
-      await publish(TOPICS.lightSet, { on: false, source: "telegram" }, { lightOn: false });
+      await publish(TOPICS.lightSet, { on: false, source: "telegram" }, { lightOn: false }, { retain: true });
       await appendLog({ type: "light", message: "Light turned OFF from Telegram" });
       await editDashboard(chatId, messageId, `✅ Light OFF\n\n${statusText(state)}`);
       break;
