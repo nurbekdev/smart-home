@@ -5,17 +5,23 @@ export default async () => {
     const base = process.env.SITE_BASE_URL;
     const webhookUrl = `${base}/.netlify/functions/telegram-webhook`;
     const response = await telegramCall("setWebhook", { url: webhookUrl });
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
+    return new Response(
+      JSON.stringify({
         ok: true,
         telegram: response
-      })
-    };
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json; charset=utf-8" }
+      }
+    );
   } catch (err) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ ok: false, error: String(err.message || err) })
-    };
+    return new Response(
+      JSON.stringify({ ok: false, error: String(err.message || err) }),
+      {
+        status: 500,
+        headers: { "content-type": "application/json; charset=utf-8" }
+      }
+    );
   }
 };

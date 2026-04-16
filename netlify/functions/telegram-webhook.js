@@ -125,41 +125,41 @@ async function handleCallback(query) {
   await answerCallback(query.id, "Done");
 }
 
-export default async (req) => {
+export default async (request) => {
   try {
-    if (req.httpMethod !== "POST") {
-      return { statusCode: 405, body: "Method Not Allowed" };
+    if (request.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405 });
     }
-    const body = JSON.parse(req.body || "{}");
+    const body = await request.json().catch(() => ({}));
 
     if (body.message?.text === "/start") {
       const userId = body.message.from?.id;
       if (!isTelegramAdmin(userId)) {
-        return { statusCode: 200, body: "ok" };
+        return new Response("ok", { status: 200 });
       }
       const state = await getState();
       await sendDashboard(body.message.chat.id, statusText(state));
-      return { statusCode: 200, body: "ok" };
+      return new Response("ok", { status: 200 });
     }
 
     if (body.callback_query) {
       await handleCallback(body.callback_query);
-      return { statusCode: 200, body: "ok" };
+      return new Response("ok", { status: 200 });
     }
 
     if (body.message?.text === "/status") {
       const userId = body.message.from?.id;
       if (!isTelegramAdmin(userId)) {
-        return { statusCode: 200, body: "ok" };
+        return new Response("ok", { status: 200 });
       }
       const state = await getState();
       await sendAlert(statusText(state), body.message.chat.id);
-      return { statusCode: 200, body: "ok" };
+      return new Response("ok", { status: 200 });
     }
 
-    return { statusCode: 200, body: "ok" };
+    return new Response("ok", { status: 200 });
   } catch (err) {
     console.error("telegram-webhook error", err);
-    return { statusCode: 500, body: "internal error" };
+    return new Response("internal error", { status: 500 });
   }
 };

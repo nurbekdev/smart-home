@@ -18,23 +18,27 @@ function extractMessage(payload) {
   return {};
 }
 
-export default async (req) => {
+export default async (request) => {
   try {
-    if (req.httpMethod !== "POST") {
-      return { statusCode: 405, body: "Method Not Allowed" };
+    if (request.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405 });
     }
 
-    if (!verifyIngestSecret(req.headers || {})) {
-      return { statusCode: 401, body: "unauthorized" };
+    const headersObj = {
+      "x-ingest-secret": request.headers.get("x-ingest-secret"),
+      "X-Ingest-Secret": request.headers.get("X-Ingest-Secret")
+    };
+    if (!verifyIngestSecret(headersObj)) {
+      return new Response("unauthorized", { status: 401 });
     }
 
-    const payload = parseBody(req.body);
+    const payload = parseBody(await request.text());
     const msg = extractMessage(payload);
     const topic = msg.topic;
     const data = typeof msg.payload === "string" ? JSON.parse(msg.payload) : msg.payload || {};
     const now = new Date().toISOString();
 
-    if (!topic) return { statusCode: 200, body: "ignored" };
+    if (!topic) return new Response("ignored", { status: 200 });
 
     if (topic === TOPICS.motion && data.motion === true) {
       const state = await getState();
@@ -57,9 +61,9 @@ export default async (req) => {
       });
     }
 
-    return { statusCode: 200, body: "ok" };
+    return new Response("ok", { status: 200 });
   } catch (err) {
     console.error("hivemq-ingest error", err);
-    return { statusCode: 500, body: "internal error" };
+    return new Response("internal error", { status: 500 });
   }
 };
