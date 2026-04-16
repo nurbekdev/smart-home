@@ -15,6 +15,9 @@ const DEFAULT_STATE = {
   updatedAt: null
 };
 
+// getStore() is called inside each function to get a fresh token on every invocation.
+// Calling it at module level causes "Token expired" errors on warm Lambda containers.
+
 export async function getState() {
   const store = getStore("iot-state");
   const value = await store.get("state", { type: "json" });
@@ -32,13 +35,8 @@ export async function setState(patch) {
 export async function appendLog(event) {
   const store = getStore("iot-state");
   const logs = (await store.get("logs", { type: "json" })) || [];
-  logs.unshift({
-    ...event,
-    at: new Date().toISOString()
-  });
-  const compact = logs.slice(0, 50);
-  await store.setJSON("logs", compact);
-  return compact;
+  logs.unshift({ ...event, at: new Date().toISOString() });
+  await store.setJSON("logs", logs.slice(0, 50));
 }
 
 export async function getLogs() {
