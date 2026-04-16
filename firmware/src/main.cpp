@@ -60,7 +60,8 @@ unsigned long lastPirSampleAt = 0;
 unsigned long lastMotionPublishedAt = 0;
 unsigned long motionCooldownMs = 15000;
 
-void postIngest(const char* topic, JsonDocument& payloadDoc);
+void queueIngest(const char* topic, JsonDocument& payloadDoc);
+void flushIngestIfPending();
 
 void setRelay(bool on) {
   lightOn = on;
@@ -88,7 +89,7 @@ void publishLightState() {
   doc["on"] = lightOn;
   doc["ts"] = nowIso();
   publishJson(TOPIC_LIGHT_STATE, doc, true);
-  postIngest(TOPIC_LIGHT_STATE, doc);
+  queueIngest(TOPIC_LIGHT_STATE, doc);
 }
 
 void publishStatus(bool online) {
@@ -103,7 +104,7 @@ void publishStatus(bool online) {
   doc["uptimeMs"] = millis();
   doc["ts"] = nowIso();
   publishJson(TOPIC_STATUS, doc, true);
-  postIngest(TOPIC_STATUS, doc);
+  queueIngest(TOPIC_STATUS, doc);
 }
 
 void publishHeartbeat() {
@@ -114,7 +115,7 @@ void publishHeartbeat() {
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["ts"] = nowIso();
   publishJson(TOPIC_HEARTBEAT, doc, false);
-  postIngest(TOPIC_HEARTBEAT, doc);
+  queueIngest(TOPIC_HEARTBEAT, doc);
 }
 
 void publishMotion() {
@@ -125,42 +126,68 @@ void publishMotion() {
   doc["nightModeOnly"] = nightModeOnly;
   doc["ts"] = nowIso();
   publishJson(TOPIC_MOTION, doc, false);
-  postIngest(TOPIC_MOTION, doc);
+  queueIngest(TOPIC_MOTION, doc);
 }
 
-// HiveMQ webhook o'rniga: Netlify ingest ga JSON (topic + payload) — dashboard va Telegram uchun.
-void postIngest(const char* topic, JsonDocument& payloadDoc) {
-  if (strlen(HIVEMQ_INGEST_SECRET_FOR_DEVICE) == 0) return;
-  if (WiFi.status() != WL_CONNECTED) return;
+// HTTPS ingest MQTT callback ichida chaqirilmasin — uzoq bloklovchi TLS MQTT ni uzadi.
+static char s_ingestTopic[72];
+static char s_ingestPayload[360];
+static volatile bool s_ingestPending = false;
 
+void queueIngest(const char* topic, JsonDocument& payloadDoc) {
+  if (strlen(HIVEMQ_INGEST_SECRET_FOR_DEVICE) == 0) return;
+  strncpy(s_ingestTopic, topic, sizeof(s_ingestTopic) - 1);
+  s_ingestTopic[sizeof(s_ingestTopic) - 1] = '\0';
+  size_t n = serializeJson(payloadDoc, s_ingestPayload, sizeof(s_ingestPayload) - 1);
+  s_ingestPayload[sizeof(s_ingestPayload) - 1] = '\0';
+  if (n == 0 || n >= sizeof(s_ingestPayload) - 1) {
+    Serial.println(F("queueIngest: payload too large"));
+    return;
+  }
+  s_ingestPending = true;
+}
+
+static void sendIngestEnvelope(const char* topic, JsonDocument& innerDoc) {
   JsonDocument envelope;
   envelope["topic"] = topic;
-  {
-    String inner;
-    serializeJson(payloadDoc, inner);
-    JsonDocument innerDoc;
-    DeserializationError err = deserializeJson(innerDoc, inner);
-    if (err) return;
-    envelope["payload"] = innerDoc.as<JsonObject>();
-  }
-
+  envelope["payload"] = innerDoc.as<JsonObject>();
   String body;
   serializeJson(envelope, body);
 
   BearSSL::WiFiClientSecure httpClient;
   httpClient.setInsecure();
   HTTPClient http;
-  http.setTimeout(12000);
+  http.setTimeout(5000);
   String url = String("https://") + NETLIFY_INGEST_HOST + NETLIFY_INGEST_PATH;
   if (!http.begin(httpClient, url)) {
-    Serial.println(F("postIngest: http.begin failed"));
+    Serial.println(F("ingest: http.begin failed"));
     return;
   }
   http.addHeader(F("Content-Type"), F("application/json"));
   http.addHeader(F("x-ingest-secret"), HIVEMQ_INGEST_SECRET_FOR_DEVICE);
   int code = http.POST(body);
-  Serial.printf("postIngest topic=%s HTTP %d\n", topic, code);
+  Serial.printf("ingest HTTP %d topic=%s\n", code, topic);
   http.end();
+}
+
+void flushIngestIfPending() {
+  if (!s_ingestPending || WiFi.status() != WL_CONNECTED) return;
+
+  char topicCopy[72];
+  char payloadCopy[360];
+  strncpy(topicCopy, s_ingestTopic, sizeof(topicCopy) - 1);
+  topicCopy[sizeof(topicCopy) - 1] = '\0';
+  strncpy(payloadCopy, s_ingestPayload, sizeof(payloadCopy) - 1);
+  payloadCopy[sizeof(payloadCopy) - 1] = '\0';
+  s_ingestPending = false;
+
+  JsonDocument innerDoc;
+  DeserializationError err = deserializeJson(innerDoc, payloadCopy);
+  if (err) {
+    Serial.println(F("flushIngest: JSON error"));
+    return;
+  }
+  sendIngestEnvelope(topicCopy, innerDoc);
 }
 
 void connectWifiNonBlocking() {
@@ -178,12 +205,18 @@ void mqttCallback(char* topic, byte* payload, unsigned int len) {
   s.reserve(len + 1);
   for (unsigned int i = 0; i < len; i++) s += (char)payload[i];
 
+  Serial.printf("MQTT RX [%s] %s\n", t.c_str(), s.c_str());
+
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, s);
-  if (err) return;
+  if (err) {
+    Serial.println(F("MQTT JSON parse failed"));
+    return;
+  }
 
   if (t == TOPIC_LIGHT_SET) {
     bool on = doc["on"] | false;
+    Serial.printf("Light SET -> %s\n", on ? "ON" : "OFF");
     setRelay(on);
     publishLightState();
   } else if (t == TOPIC_RESTART) {
@@ -208,6 +241,7 @@ void connectMqttNonBlocking() {
   lastMqttAttemptAt = now;
 
   String clientId = String(DEVICE_ID) + "-" + String(ESP.getChipId(), HEX);
+  // cleanSession=false: qisqa vaqt offline bo'lsa ham QoS1 buyruqlar brokerda saqlanadi
   if (mqttClient.connect(
           clientId.c_str(),
           MQTT_USER,
@@ -215,13 +249,17 @@ void connectMqttNonBlocking() {
           TOPIC_STATUS,
           1,
           true,
-          "{\"online\":false}")) {
+          "{\"online\":false}",
+          false)) {
+    Serial.println(F("MQTT connected + subscribed"));
     mqttClient.subscribe(TOPIC_LIGHT_SET, 1);
     mqttClient.subscribe(TOPIC_RESTART, 1);
     mqttClient.subscribe(TOPIC_ARM_STATE, 1);
     mqttClient.subscribe(TOPIC_NIGHT_MODE_STATE, 1);
     publishStatus(true);
     publishLightState();
+  } else {
+    Serial.printf("MQTT connect FAILED state=%d\n", mqttClient.state());
   }
 }
 
@@ -276,7 +314,9 @@ void setup() {
   secureClient.setInsecure();  // For production: pin CA cert instead.
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
-  mqttClient.setBufferSize(512);
+  mqttClient.setBufferSize(1024);
+  mqttClient.setKeepAlive(60);
+  mqttClient.setSocketTimeout(20);
 
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   setupOta();
@@ -284,8 +324,21 @@ void setup() {
 
 void loop() {
   connectWifiNonBlocking();
+  static bool wifiOkPrinted = false;
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wifiOkPrinted) {
+      wifiOkPrinted = true;
+      Serial.print(F("WiFi connected, IP: "));
+      Serial.println(WiFi.localIP());
+    }
+  } else {
+    wifiOkPrinted = false;
+  }
+
   ArduinoOTA.handle();
   connectMqttNonBlocking();
+  mqttClient.loop();
+  flushIngestIfPending();
   mqttClient.loop();
   handlePirNonBlocking();
 

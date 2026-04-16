@@ -1,8 +1,12 @@
 import mqtt from "mqtt";
 
 function getUrl() {
-  const host = process.env.HIVEMQ_HOST;
+  let host = (process.env.HIVEMQ_HOST || "").trim();
+  host = host.replace(/^https?:\/\//i, "");
+  host = host.split("/")[0] || "";
+  if (host.includes(":")) host = host.split(":")[0];
   const port = process.env.HIVEMQ_PORT || "8884";
+  if (!host) throw new Error("HIVEMQ_HOST is empty");
   return `wss://${host}:${port}/mqtt`;
 }
 
@@ -20,15 +24,16 @@ export async function mqttPublish(topic, payload, options = {}) {
       password: process.env.HIVEMQ_PASSWORD,
       clientId: createClientId(),
       protocolVersion: 4,
-      connectTimeout: 5000,
+      connectTimeout: 15000,
       reconnectPeriod: 0,
-      clean: true
+      clean: true,
+      keepalive: 30
     });
 
     const failTimeout = setTimeout(() => {
       client.end(true);
       reject(new Error("MQTT publish timeout"));
-    }, 7000);
+    }, 20000);
 
     client.on("connect", () => {
       client.publish(topic, JSON.stringify(payload), { qos: 1, ...options }, (err) => {
