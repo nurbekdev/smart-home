@@ -1,0 +1,36 @@
+body {
+  margin: 0;
+  font-family: Inter, system-ui, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.card {
+  max-width: 760px;
+  margin: 32px auto;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 16px;
+  padding: 24px;
+}
+
+.subtitle {
+  color: #93c5fd;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 16px 0 20px;
+}
+
+.item {
+  background: #1f2937;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+#logs {
+  padding-left: 18px;
+}

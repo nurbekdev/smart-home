@@ -1,0 +1,17 @@
+{
+  "name": "smart-motion-light-serverless",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "netlify dev",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@netlify/blobs": "^9.0.0",
+    "mqtt": "^5.10.4"
+  },
+  "devDependencies": {
+    "eslint": "^9.22.0"
+  }
+}

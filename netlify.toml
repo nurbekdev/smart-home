@@ -1,0 +1,13 @@
+[build]
+  publish = "dashboard"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/status"
+  to = "/.netlify/functions/status"
+  status = 200
+
+[[redirects]]
+  from = "/api/health"
+  to = "/.netlify/functions/health"
+  status = 200
