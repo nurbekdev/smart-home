@@ -6,7 +6,8 @@ export const TOPICS = {
   heartbeat: "home/mainroom/heartbeat",
   restart: "home/mainroom/restart",
   armState: "home/mainroom/arm/state",
-  nightModeState: "home/mainroom/night_mode/state"
+  nightModeState: "home/mainroom/night_mode/state",
+  settingsState: "home/mainroom/settings"
 };
 
 export const CALLBACKS = {

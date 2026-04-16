@@ -108,10 +108,8 @@ async function handleCallback(query) {
       break;
     case CALLBACKS.AUTO_OFF_TOGGLE:
       state = await setState({ autoOffEnabled: !state.autoOffEnabled });
-      await appendLog({
-        type: "settings",
-        message: `Auto-OFF ${state.autoOffEnabled ? "enabled" : "disabled"}`
-      });
+      await mqttPublish(TOPICS.settingsState, { motionCooldownSeconds: state.motionCooldownSeconds, autoOffMinutes: state.autoOffEnabled ? state.autoOffMinutes : 0 }, { retain: true });
+      await appendLog({ type: "settings", message: `Auto-OFF ${state.autoOffEnabled ? "enabled" : "disabled"}` });
       await editSettings(chatId, messageId, "⚙ Settings updated", state);
       break;
     case CALLBACKS.NIGHT_MODE_TOGGLE:
@@ -125,11 +123,13 @@ async function handleCallback(query) {
       break;
     case CALLBACKS.COOLDOWN_INC:
       state = await setState({ motionCooldownSeconds: Math.min(120, state.motionCooldownSeconds + 5) });
+      await mqttPublish(TOPICS.settingsState, { motionCooldownSeconds: state.motionCooldownSeconds, autoOffMinutes: state.autoOffMinutes }, { retain: true });
       await appendLog({ type: "settings", message: `Motion cooldown set to ${state.motionCooldownSeconds}s` });
       await editSettings(chatId, messageId, "⚙ Settings updated", state);
       break;
     case CALLBACKS.COOLDOWN_DEC:
       state = await setState({ motionCooldownSeconds: Math.max(5, state.motionCooldownSeconds - 5) });
+      await mqttPublish(TOPICS.settingsState, { motionCooldownSeconds: state.motionCooldownSeconds, autoOffMinutes: state.autoOffMinutes }, { retain: true });
       await appendLog({ type: "settings", message: `Motion cooldown set to ${state.motionCooldownSeconds}s` });
       await editSettings(chatId, messageId, "⚙ Settings updated", state);
       break;

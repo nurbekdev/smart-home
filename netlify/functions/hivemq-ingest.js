@@ -45,10 +45,19 @@ export default async (request) => {
       const cooldown = Number(state.motionCooldownSeconds || 15);
       const last = state.lastMotionAt ? Date.parse(state.lastMotionAt) : 0;
       if (Date.now() - last >= cooldown * 1000) {
-        await setState({ lastMotionAt: now, lastSeenAt: now, online: true });
-        await appendLog({ type: "motion", message: "Motion detected in room" });
+        await setState({ lastMotionAt: now, lastSeenAt: now, online: true, lightOn: true });
+        const timeStr = new Date(now).toLocaleString("uz-UZ", {
+          timeZone: "Asia/Tashkent",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        });
+        await appendLog({ type: "motion", message: `Harakat aniqlandi — ${timeStr}` });
         if (state.armed) {
-          await sendAlert("🚨 Motion detected in room!");
+          await sendAlert(`🚨 Harakat aniqlandi!\n🕐 Vaqt: ${timeStr}`);
         }
       }
     } else if (topic === TOPICS.lightState) {

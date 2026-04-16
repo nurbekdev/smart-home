@@ -87,6 +87,7 @@ const char* TOPIC_HEARTBEAT = "home/mainroom/heartbeat";
 const char* TOPIC_RESTART = "home/mainroom/restart";
 const char* TOPIC_ARM_STATE = "home/mainroom/arm/state";
 const char* TOPIC_NIGHT_MODE_STATE = "home/mainroom/night_mode/state";
+const char* TOPIC_SETTINGS = "home/mainroom/settings";
 
 const unsigned long HEARTBEAT_INTERVAL_MS = 30000;
 // Qayta ulanish: 3s juda tez — WiFi.begin takrorlanib assotsiatsiyani buzishi mumkin
@@ -110,6 +111,8 @@ unsigned long lastMqttAttemptAt = 0;
 unsigned long lastPirSampleAt = 0;
 unsigned long lastMotionPublishedAt = 0;
 unsigned long motionCooldownMs = 15000;
+unsigned long autoOffMs = 3UL * 60UL * 1000UL;  // 3 daqiqa, Telegram settings bilan o'zgaradi
+unsigned long lightAutoOffAt = 0;                 // 0 = auto-off rejalashtirilmagan
 unsigned long lastWifiDiagAt = 0;
 
 static unsigned long s_bootMillis = 0;
@@ -213,6 +216,7 @@ void publishMotion() {
   doc["nightModeOnly"] = nightModeOnly;
   doc["ts"] = nowIso();
   publishJson(TOPIC_MOTION, doc, false);
+  queueIngest(TOPIC_MOTION, doc);  // Netlify ga yuborish → Telegram notification
 }
 
 // HTTPS ingest MQTT callback ichida chaqirilmasin — uzoq bloklovchi TLS MQTT ni uzadi.
@@ -268,6 +272,13 @@ void flushIngestIfPending() {
   strncpy(payloadCopy, s_ingestPayload, sizeof(payloadCopy) - 1);
   payloadCopy[sizeof(payloadCopy) - 1] = '\0';
   s_ingestPending = false;
+
+  // ESP8266 da MQTT (BearSSL) + HTTPS (BearSSL) bir vaqtda — xotira yetmaydi → HTTP -1.
+  // MQTT ni vaqtincha yopamiz, HTTPS tugagach connectMqttNonBlocking qayta ulashtiradi.
+  if (mqttClient.connected()) {
+    mqttClient.disconnect();
+    delay(50);
+  }
 
   JsonDocument innerDoc;
   DeserializationError err = deserializeJson(innerDoc, payloadCopy);
@@ -346,6 +357,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int len) {
   } else if (t == TOPIC_NIGHT_MODE_STATE) {
     nightModeOnly = doc["enabled"] | nightModeOnly;
     publishStatus(true);
+  } else if (t == TOPIC_SETTINGS) {
+    if (doc.containsKey("motionCooldownSeconds")) {
+      motionCooldownMs = (unsigned long)(doc["motionCooldownSeconds"].as<int>()) * 1000UL;
+    }
+    if (doc.containsKey("autoOffMinutes")) {
+      autoOffMs = (unsigned long)(doc["autoOffMinutes"].as<int>()) * 60UL * 1000UL;
+    }
+    Serial.printf("Settings yangilandi: cooldown=%lus autoOff=%lum\n",
+                  motionCooldownMs / 1000, autoOffMs / 60000);
   }
 }
 
@@ -377,6 +397,7 @@ void connectMqttNonBlocking() {
     // light/set retained — Telegram dan oxirgi buyruq saqlanadi, bu yerda uni qabul qilamiz
     mqttClient.subscribe(TOPIC_ARM_STATE, 1);
     mqttClient.subscribe(TOPIC_NIGHT_MODE_STATE, 1);
+    mqttClient.subscribe(TOPIC_SETTINGS, 1);
     mqttClient.loop();
     publishStatus(true);
     publishLightState();
@@ -411,6 +432,11 @@ void handlePirNonBlocking() {
       if (now - lastMotionPublishedAt < motionCooldownMs) return;
       if (nightModeOnly && !isNightTimeLocal()) return;
       lastMotionPublishedAt = now;
+      // Releni yoq va auto-off jadvali
+      setRelay(true);
+      publishLightState();
+      lightAutoOffAt = now + autoOffMs;
+      Serial.printf("Harakat! Chiroq yondi. Auto-OFF: %.0f s keyin\n", autoOffMs / 1000.0);
       if (mqttClient.connected()) publishMotion();
     }
   }
@@ -492,6 +518,14 @@ void loop() {
   handlePirNonBlocking();
 
   unsigned long now = millis();
+
+  // Auto-off: harakat bo'lmasa belgilangan vaqtda chiroqni o'chir
+  if (lightOn && lightAutoOffAt > 0 && now >= lightAutoOffAt) {
+    lightAutoOffAt = 0;
+    setRelay(false);
+    Serial.println(F("Auto-OFF: harakat yo'q, chiroq o'chdi"));
+    if (mqttClient.connected()) publishLightState();
+  }
   if (mqttClient.connected() && now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
     lastHeartbeatAt = now;
     publishHeartbeat();
