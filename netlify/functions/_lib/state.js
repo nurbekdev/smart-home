@@ -1,8 +1,6 @@
 import { getStore } from "@netlify/blobs";
 import { DEFAULTS } from "./constants.js";
 
-const store = getStore("iot-state");
-
 const DEFAULT_STATE = {
   lightOn: false,
   armed: DEFAULTS.armed,
@@ -18,11 +16,13 @@ const DEFAULT_STATE = {
 };
 
 export async function getState() {
+  const store = getStore("iot-state");
   const value = await store.get("state", { type: "json" });
   return { ...DEFAULT_STATE, ...(value || {}) };
 }
 
 export async function setState(patch) {
+  const store = getStore("iot-state");
   const current = await getState();
   const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
   await store.setJSON("state", next);
@@ -30,6 +30,7 @@ export async function setState(patch) {
 }
 
 export async function appendLog(event) {
+  const store = getStore("iot-state");
   const logs = (await store.get("logs", { type: "json" })) || [];
   logs.unshift({
     ...event,
@@ -41,5 +42,6 @@ export async function appendLog(event) {
 }
 
 export async function getLogs() {
+  const store = getStore("iot-state");
   return (await store.get("logs", { type: "json" })) || [];
 }
