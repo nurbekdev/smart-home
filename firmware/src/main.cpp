@@ -61,11 +61,22 @@
 #define NETLIFY_INGEST_SECRET ""
 #endif
 
-// NodeMCU D5. Change this if your PIR sensor is wired to another pin.
-static const uint8_t PIR_PIN = 14;
-// NodeMCU D6. Change this only if your relay is wired to another pin.
-static const uint8_t RELAY_PIN = 12;
-static const bool RELAY_ACTIVE_LOW = true;
+#ifndef PIR_PIN
+#define PIR_PIN 14
+#endif
+
+#ifndef RELAY_PIN
+#define RELAY_PIN 12
+#endif
+
+#ifndef RELAY_ACTIVE_LOW
+#define RELAY_ACTIVE_LOW 1
+#endif
+
+// Defaults: PIR on NodeMCU D5/GPIO14, relay on D6/GPIO12.
+static const uint8_t PIR_PIN_NUMBER = PIR_PIN;
+static const uint8_t RELAY_PIN_NUMBER = RELAY_PIN;
+static const bool RELAY_IS_ACTIVE_LOW = RELAY_ACTIVE_LOW == 1;
 
 static const unsigned long WIFI_RETRY_MS = 10000;
 static const unsigned long MQTT_RETRY_MS = 5000;
@@ -92,9 +103,13 @@ char ingestPayload[256];
 
 void setRelay(bool on) {
   relayOn = on;
-  const uint8_t active = RELAY_ACTIVE_LOW ? LOW : HIGH;
-  const uint8_t inactive = RELAY_ACTIVE_LOW ? HIGH : LOW;
-  digitalWrite(RELAY_PIN, on ? active : inactive);
+  const uint8_t active = RELAY_IS_ACTIVE_LOW ? LOW : HIGH;
+  const uint8_t inactive = RELAY_IS_ACTIVE_LOW ? HIGH : LOW;
+  digitalWrite(RELAY_PIN_NUMBER, on ? active : inactive);
+  Serial.printf("Relay GPIO%d -> %s (pin level=%s)\n",
+                RELAY_PIN_NUMBER,
+                on ? "ON" : "OFF",
+                (on ? active : inactive) == HIGH ? "HIGH" : "LOW");
 }
 
 void publishStatus(bool online) {
@@ -108,7 +123,9 @@ void publishStatus(bool online) {
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
   doc["uptimeMs"] = millis();
-  doc["firmware"] = "elshodlampa-1.0.0";
+  doc["firmware"] = "smart-home-1.1.0";
+  doc["relayPin"] = RELAY_PIN_NUMBER;
+  doc["relayActiveLow"] = RELAY_IS_ACTIVE_LOW;
 
   char payload[256];
   const size_t length = serializeJson(doc, payload, sizeof(payload));
@@ -136,6 +153,11 @@ void publishMotion() {
   ingestPending = true;
 
   Serial.println(F("Motion published"));
+}
+
+void clearRetainedCommand() {
+  if (!mqttClient.connected()) return;
+  mqttClient.publish(MQTT_COMMAND_TOPIC, reinterpret_cast<const uint8_t*>(""), 0, true);
 }
 
 void flushIngestIfPending() {
@@ -189,6 +211,10 @@ void flushIngestIfPending() {
 void handleCommand(char* topic, byte* payload, unsigned int length) {
   if (strcmp(topic, MQTT_COMMAND_TOPIC) != 0) return;
 
+  Serial.printf("MQTT command [%s] len=%u: ", topic, length);
+  for (unsigned int i = 0; i < length; i++) Serial.print((char)payload[i]);
+  Serial.println();
+
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, payload, length);
   if (err) {
@@ -198,18 +224,26 @@ void handleCommand(char* topic, byte* payload, unsigned int length) {
   }
 
   const char* relay = doc["relay"] | "";
+  const char* state = doc["state"] | "";
+  const char* power = doc["power"] | "";
   const char* action = doc["action"] | "";
+  const bool boolOn = doc["on"] | false;
+  const bool hasOn = doc["on"].is<bool>();
+  const bool lightOn = doc["lightOn"] | false;
+  const bool hasLightOn = doc["lightOn"].is<bool>();
 
-  if (strcmp(relay, "on") == 0) {
+  if (strcmp(relay, "on") == 0 || strcmp(state, "on") == 0 || strcmp(power, "on") == 0 ||
+      (hasOn && boolOn) || (hasLightOn && lightOn)) {
     setRelay(true);
-    Serial.println(F("Relay ON"));
+    clearRetainedCommand();
     publishStatus(true);
     return;
   }
 
-  if (strcmp(relay, "off") == 0) {
+  if (strcmp(relay, "off") == 0 || strcmp(state, "off") == 0 || strcmp(power, "off") == 0 ||
+      (hasOn && !boolOn) || (hasLightOn && !lightOn)) {
     setRelay(false);
-    Serial.println(F("Relay OFF"));
+    clearRetainedCommand();
     publishStatus(true);
     return;
   }
@@ -245,7 +279,7 @@ void connectMqttNonBlocking() {
   if (now - lastMqttAttemptAt < MQTT_RETRY_MS) return;
   lastMqttAttemptAt = now;
 
-  String clientId = String("elshodlampa-") + DEVICE_ID + "-" + String(ESP.getChipId(), HEX);
+  String clientId = String("smart-home-") + DEVICE_ID + "-" + String(ESP.getChipId(), HEX);
   Serial.println(F("Connecting MQTT..."));
 
   if (mqttClient.connect(
@@ -273,7 +307,7 @@ void handleMotionNonBlocking() {
   if (now - lastPirSampleAt < PIR_SAMPLE_MS) return;
   lastPirSampleAt = now;
 
-  const bool raw = digitalRead(PIR_PIN) == HIGH;
+  const bool raw = digitalRead(PIR_PIN_NUMBER) == HIGH;
   if (raw != pirLastRead) {
     pirLastRead = raw;
     pirChangedAt = now;
@@ -294,10 +328,13 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println();
-  Serial.println(F("Elshodlampa ESP8266 boot"));
+  Serial.println(F("Smart Home ESP8266 boot"));
+  Serial.printf("Relay config: GPIO%d activeLow=%s\n",
+                RELAY_PIN_NUMBER,
+                RELAY_IS_ACTIVE_LOW ? "true" : "false");
 
-  pinMode(RELAY_PIN, OUTPUT);
-  pinMode(PIR_PIN, INPUT);
+  pinMode(RELAY_PIN_NUMBER, OUTPUT);
+  pinMode(PIR_PIN_NUMBER, INPUT);
   setRelay(false);
 
   wifiSecure.setInsecure();

@@ -1,4 +1,4 @@
-# Elshodlampa
+# Smart Home
 
 ESP8266 lamp control through Telegram, Netlify Functions, and MQTT. The bot is production-oriented for serverless hosting: Telegram uses webhook delivery only, and Netlify opens an MQTT connection only for the duration of each command publish.
 

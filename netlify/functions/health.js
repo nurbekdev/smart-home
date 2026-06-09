@@ -2,7 +2,7 @@ export default async () => {
   return new Response(
     JSON.stringify({
       ok: true,
-      service: "elshodlampa",
+      service: "smart-home",
       runtime: "netlify-functions",
       time: new Date().toISOString()
     }),

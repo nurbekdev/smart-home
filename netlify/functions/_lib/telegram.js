@@ -5,8 +5,8 @@ export function controlKeyboard() {
   return {
     inline_keyboard: [
       [
-        { text: "Lampani yoqish", callback_data: "/on" },
-        { text: "Lampani o'chirish", callback_data: "/off" }
+        { text: "Relay ON", callback_data: "/on" },
+        { text: "Relay OFF", callback_data: "/off" }
       ],
       [
         { text: "Statusni yangilash", callback_data: "/status" },

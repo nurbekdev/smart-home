@@ -45,12 +45,12 @@ function labelRelay(state) {
 
 function panelText(state, notice = "") {
   return [
-    "Elshodlampa boshqaruv paneli",
+    "Smart Home boshqaruv paneli",
     "",
     notice ? `Natija: ${notice}` : "Kerakli amalni tanlang.",
     "",
     `Holat: ${labelOnline(state)}`,
-    `Lampa: ${labelRelay(state)}`,
+    `Relay: ${labelRelay(state)}`,
     `Device: ${state.deviceId || "device-1"}`,
     `Oxirgi aloqa: ${formatDateTime(state.lastSeenAt)}`,
     `Oxirgi harakat: ${formatDateTime(state.lastMotionAt)}`,
@@ -78,7 +78,7 @@ async function publishCommand(command, patch) {
       ? { action: "status", source: "telegram", time: Date.now() }
       : { relay: command, source: "telegram", time: Date.now() };
 
-  const result = await mqttPublish(TOPICS.command, payload, { retain: false });
+  const result = await mqttPublish(TOPICS.command, payload, { retain: command !== "status" });
   const state = await setState({
     ...patch,
     lastCommand: command,
@@ -116,7 +116,7 @@ async function handleAllowedCommand(update, chatId, command) {
     case "/on": {
       try {
         const state = await publishCommand("on", { lightOn: true });
-        await replyWithPanel(update, chatId, panelText(state, "Lampani yoqish buyrug'i yuborildi."));
+        await replyWithPanel(update, chatId, panelText(state, "Relay yoqish buyrug'i yuborildi."));
       } catch (err) {
         console.error("on mqtt publish failed", err?.message || err);
         await appendLog({ type: "mqtt", message: "ON command publish failed" });
@@ -128,7 +128,7 @@ async function handleAllowedCommand(update, chatId, command) {
     case "/off": {
       try {
         const state = await publishCommand("off", { lightOn: false });
-        await replyWithPanel(update, chatId, panelText(state, "Lampani o'chirish buyrug'i yuborildi."));
+        await replyWithPanel(update, chatId, panelText(state, "Relay o'chirish buyrug'i yuborildi."));
       } catch (err) {
         console.error("off mqtt publish failed", err?.message || err);
         await appendLog({ type: "mqtt", message: "OFF command publish failed" });
