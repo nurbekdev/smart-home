@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+.netlify/
+
+firmware/.pio/
+firmware/src/secrets.h
+
+.DS_Store
+npm-debug.log*

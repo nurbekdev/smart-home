@@ -1,21 +1,18 @@
 body {
   margin: 0;
   font-family: Inter, system-ui, sans-serif;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #f5f7fb;
+  color: #172033;
 }
 
-.card {
+.shell {
   max-width: 760px;
   margin: 32px auto;
-  background: #111827;
-  border: 1px solid #1f2937;
-  border-radius: 16px;
   padding: 24px;
 }
 
 .subtitle {
-  color: #93c5fd;
+  color: #4f668a;
 }
 
 .grid {
@@ -26,9 +23,16 @@ body {
 }
 
 .item {
-  background: #1f2937;
-  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
   padding: 10px 12px;
+  min-height: 52px;
+}
+
+.error {
+  border-color: #d94848;
+  color: #9d1c1c;
 }
 
 #logs {

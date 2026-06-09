@@ -1,58 +1,56 @@
 import mqtt from "mqtt";
 
 function getUrl() {
-  let host = (process.env.HIVEMQ_HOST || "").trim();
-  host = host.replace(/^https?:\/\//i, "");
-  host = host.split("/")[0] || "";
-  if (host.includes(":")) host = host.split(":")[0];
-  const port = process.env.HIVEMQ_PORT || "8884";
-  if (!host) throw new Error("HIVEMQ_HOST is empty");
-  return `wss://${host}:${port}/mqtt`;
+  const url = (process.env.MQTT_URL || "").trim();
+  if (!url) throw new Error("MQTT_URL is not configured");
+  return url;
 }
 
 function createClientId() {
-  const p = process.env.HIVEMQ_CLIENT_PREFIX || "serverless-iot";
   const rnd = Math.random().toString(16).slice(2, 10);
-  return `${p}-${Date.now()}-${rnd}`;
+  return `netlify-telegram-${Date.now()}-${rnd}`;
 }
 
 export async function mqttPublish(topic, payload, options = {}) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
+    let settled = false;
+    let failTimeout;
     const client = mqtt.connect(getUrl(), {
-      username: process.env.HIVEMQ_USERNAME,
-      password: process.env.HIVEMQ_PASSWORD,
+      username: process.env.MQTT_USER,
+      password: process.env.MQTT_PASS,
       clientId: createClientId(),
       protocolVersion: 4,
-      connectTimeout: 15000,
+      connectTimeout: Number(process.env.MQTT_CONNECT_TIMEOUT_MS || 8000),
       reconnectPeriod: 0,
       clean: true,
-      keepalive: 30
+      keepalive: 15
     });
 
-    const failTimeout = setTimeout(() => {
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(failTimeout);
       client.end(true);
-      reject(new Error("MQTT publish timeout"));
-    }, 20000);
+      fn(value);
+    };
+
+    failTimeout = setTimeout(() => {
+      settle(reject, new Error("MQTT publish timeout"));
+    }, Number(process.env.MQTT_PUBLISH_TIMEOUT_MS || 12000));
 
     client.on("connect", () => {
       client.publish(topic, JSON.stringify(payload), { qos: 1, ...options }, (err) => {
-        clearTimeout(failTimeout);
         if (err) {
-          client.end(true);
-          reject(err);
+          settle(reject, err);
           return;
         }
-        client.end(false, () => {
-          resolve({ latencyMs: Date.now() - start });
-        });
+        settle(resolve, { latencyMs: Date.now() - start, topic });
       });
     });
 
     client.on("error", (err) => {
-      clearTimeout(failTimeout);
-      client.end(true);
-      reject(err);
+      settle(reject, err);
     });
   });
 }

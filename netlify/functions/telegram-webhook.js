@@ -1,190 +1,157 @@
-import { CALLBACKS, TOPICS } from "./_lib/constants.js";
-import { isTelegramAdmin } from "./_lib/security.js";
-import { appendLog, getLogs, getState, setState } from "./_lib/state.js";
-import {
-  answerCallback,
-  editDashboard,
-  editSettings,
-  sendAlert,
-  sendDashboard
-} from "./_lib/telegram.js";
+import { TOPICS } from "./_lib/constants.js";
 import { mqttPublish } from "./_lib/mqtt.js";
+import { appendLog, getState, setState } from "./_lib/state.js";
+import { answerCallback, sendHelp, sendMessage } from "./_lib/telegram.js";
+import { isAllowedChat, verifyTelegramSecret } from "./_lib/security.js";
 
-function statusText(state) {
+function commandFromUpdate(update) {
+  const callbackData = update.callback_query?.data;
+  if (callbackData) return callbackData.trim().split(/\s+/)[0].toLowerCase();
+
+  const text = update.message?.text || "";
+  return text.trim().split(/\s+/)[0].split("@")[0].toLowerCase();
+}
+
+function chatIdFromUpdate(update) {
+  return update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+}
+
+function helpText() {
   return [
-    "🏠 Smart Security + Light",
-    `Light: ${state.lightOn ? "ON" : "OFF"}`,
-    `Armed: ${state.armed ? "YES" : "NO"}`,
-    `Night mode: ${state.nightModeOnly ? "YES" : "NO"}`,
-    `Online: ${state.online ? "YES" : "NO"}`,
-    `Last seen: ${state.lastSeenAt || "-"}`,
-    `Last motion: ${state.lastMotionAt || "-"}`,
-    `Latency: ${state.lastLatencyMs ?? "-"} ms`,
-    `Cooldown: ${state.motionCooldownSeconds}s`,
-    `Auto OFF: ${state.autoOffEnabled ? `${state.autoOffMinutes} min` : "disabled"}`
+    "Elshodlampa bot tayyor.",
+    "",
+    "Buyruqlar:",
+    "/on - lampani yoqish",
+    "/off - lampani o'chirish",
+    "/status - device statusini so'rash",
+    "/help - yordam"
   ].join("\n");
 }
 
-async function handleCallback(query) {
-  const userId = query.from?.id;
-  if (!isTelegramAdmin(userId)) {
-    await answerCallback(query.id, "Unauthorized");
+function formatStatus(state) {
+  return [
+    "Elshodlampa status",
+    `Device: ${state.deviceId || "device-1"}`,
+    `Online: ${state.online ? "YES" : "NO"}`,
+    `Relay: ${state.lightOn ? "ON" : "OFF"}`,
+    `Last seen: ${state.lastSeenAt || "-"}`,
+    `Last status: ${state.lastStatusAt || "-"}`,
+    `Last command: ${state.lastCommand || "-"}`,
+    `MQTT latency: ${state.lastLatencyMs ?? "-"} ms`,
+    `IP: ${state.ip || "-"}`,
+    `RSSI: ${state.rssi ?? "-"}`
+  ].join("\n");
+}
+
+async function safeTelegram(action) {
+  try {
+    await action();
+  } catch (err) {
+    console.error("telegram api failed", err?.message || err);
+  }
+}
+
+async function publishCommand(command, patch) {
+  const payload =
+    command === "status"
+      ? { action: "status", source: "telegram", time: Date.now() }
+      : { relay: command, source: "telegram", time: Date.now() };
+
+  const result = await mqttPublish(TOPICS.command, payload, { retain: false });
+  const state = await setState({
+    ...patch,
+    lastCommand: command,
+    lastCommandAt: new Date().toISOString(),
+    lastLatencyMs: result.latencyMs
+  });
+  await appendLog({ type: "telegram", message: `Command /${command} published to MQTT` });
+  return state;
+}
+
+async function handleAllowedCommand(chatId, command) {
+  switch (command) {
+    case "/start":
+    case "/help":
+      await sendHelp(chatId, helpText());
+      return;
+    case "/on": {
+      try {
+        const state = await publishCommand("on", { lightOn: true });
+        await sendMessage(chatId, `OK. Lampa yoqish buyrug'i yuborildi.\n\n${formatStatus(state)}`);
+      } catch (err) {
+        console.error("on mqtt publish failed", err?.message || err);
+        await appendLog({ type: "mqtt", message: "ON command publish failed" });
+        await sendMessage(chatId, "MQTT xatosi: lampa yoqish buyrug'i yuborilmadi. Broker sozlamalarini tekshiring.");
+      }
+      return;
+    }
+    case "/off": {
+      try {
+        const state = await publishCommand("off", { lightOn: false });
+        await sendMessage(chatId, `OK. Lampa o'chirish buyrug'i yuborildi.\n\n${formatStatus(state)}`);
+      } catch (err) {
+        console.error("off mqtt publish failed", err?.message || err);
+        await appendLog({ type: "mqtt", message: "OFF command publish failed" });
+        await sendMessage(chatId, "MQTT xatosi: lampa o'chirish buyrug'i yuborilmadi. Broker sozlamalarini tekshiring.");
+      }
+      return;
+    }
+    case "/status": {
+      let state = await getState();
+      try {
+        state = await publishCommand("status", {});
+      } catch (err) {
+        console.error("status mqtt publish failed", err?.message || err);
+        await appendLog({ type: "mqtt", message: "Status request publish failed" });
+      }
+      await sendMessage(chatId, formatStatus(state));
+      return;
+    }
+    default:
+      await sendHelp(chatId, `Noma'lum buyruq: ${command || "-"}\n\n${helpText()}`);
+  }
+}
+
+async function processUpdate(update) {
+  const chatId = chatIdFromUpdate(update);
+  if (!chatId) return;
+
+  const command = commandFromUpdate(update);
+  if (update.callback_query?.id) {
+    await safeTelegram(() => answerCallback(update.callback_query.id));
+  }
+
+  if (!isAllowedChat(chatId)) {
+    await safeTelegram(() => sendMessage(chatId, "Sizga ruxsat berilmagan."));
     return;
   }
 
-  const chatId = query.message.chat.id;
-  const messageId = query.message.message_id;
-  const action = query.data;
-  let state = await getState();
-
-  const publish = async (topic, body, localPatch = {}, mqttOpts = {}) => {
-    const result = await mqttPublish(topic, body, { retain: false, ...mqttOpts });
-    state = await setState({ ...localPatch, lastLatencyMs: result.latencyMs });
-    return result;
-  };
-
-  switch (action) {
-    case CALLBACKS.LIGHT_ON:
-      try {
-        await publish(TOPICS.lightSet, { on: true, source: "telegram" }, { lightOn: true }, { retain: true });
-        await appendLog({ type: "light", message: "Light turned ON from Telegram" });
-        await editDashboard(chatId, messageId, `✅ Light ON\n\n${statusText(state)}`);
-      } catch (e) {
-        console.error("LIGHT_ON mqtt", e);
-        await answerCallback(query.id, "MQTT xatosi");
-        const st = await getState();
-        await editDashboard(
-          chatId,
-          messageId,
-          `❌ MQTT: ${e?.message || e}\nTekshiring: HIVEMQ_HOST (faqat host), HIVEMQ_PORT=8884, login/parol.\n\n${statusText(st)}`
-        );
-        return;
-      }
-      break;
-    case CALLBACKS.LIGHT_OFF:
-      try {
-        await publish(TOPICS.lightSet, { on: false, source: "telegram" }, { lightOn: false }, { retain: true });
-        await appendLog({ type: "light", message: "Light turned OFF from Telegram" });
-        await editDashboard(chatId, messageId, `✅ Light OFF\n\n${statusText(state)}`);
-      } catch (e) {
-        console.error("LIGHT_OFF mqtt", e);
-        await answerCallback(query.id, "MQTT xatosi");
-        const st = await getState();
-        await editDashboard(
-          chatId,
-          messageId,
-          `❌ MQTT: ${e?.message || e}\nTekshiring: HIVEMQ_HOST (faqat host), HIVEMQ_PORT=8884, login/parol.\n\n${statusText(st)}`
-        );
-        return;
-      }
-      break;
-    case CALLBACKS.ARM:
-      await publish(TOPICS.armState, { armed: true, source: "telegram" }, { armed: true });
-      await appendLog({ type: "security", message: "System armed from Telegram" });
-      await editDashboard(chatId, messageId, `🛡 System armed\n\n${statusText(state)}`);
-      break;
-    case CALLBACKS.DISARM:
-      await publish(TOPICS.armState, { armed: false, source: "telegram" }, { armed: false });
-      await appendLog({ type: "security", message: "System disarmed from Telegram" });
-      await editDashboard(chatId, messageId, `🔕 System disarmed\n\n${statusText(state)}`);
-      break;
-    case CALLBACKS.STATUS:
-      await editDashboard(chatId, messageId, statusText(state));
-      break;
-    case CALLBACKS.LOGS: {
-      const logs = await getLogs();
-      const text =
-        logs.length === 0
-          ? "📜 No logs yet."
-          : `📜 Recent logs:\n${logs
-              .slice(0, 10)
-              .map((l) => `- [${l.at}] ${l.message}`)
-              .join("\n")}`;
-      await editDashboard(chatId, messageId, text);
-      break;
-    }
-    case CALLBACKS.SETTINGS:
-      await editSettings(chatId, messageId, "⚙ Settings", state);
-      break;
-    case CALLBACKS.AUTO_OFF_TOGGLE:
-      state = await setState({ autoOffEnabled: !state.autoOffEnabled });
-      await mqttPublish(TOPICS.settingsState, { motionCooldownSeconds: state.motionCooldownSeconds, autoOffMinutes: state.autoOffEnabled ? state.autoOffMinutes : 0 }, { retain: true });
-      await appendLog({ type: "settings", message: `Auto-OFF ${state.autoOffEnabled ? "enabled" : "disabled"}` });
-      await editSettings(chatId, messageId, "⚙ Settings updated", state);
-      break;
-    case CALLBACKS.NIGHT_MODE_TOGGLE:
-      state = await setState({ nightModeOnly: !state.nightModeOnly });
-      await mqttPublish(TOPICS.nightModeState, { enabled: state.nightModeOnly, source: "telegram" });
-      await appendLog({
-        type: "settings",
-        message: `Night mode ${state.nightModeOnly ? "enabled" : "disabled"}`
-      });
-      await editSettings(chatId, messageId, "⚙ Settings updated", state);
-      break;
-    case CALLBACKS.COOLDOWN_INC:
-      state = await setState({ motionCooldownSeconds: Math.min(120, state.motionCooldownSeconds + 5) });
-      await mqttPublish(TOPICS.settingsState, { motionCooldownSeconds: state.motionCooldownSeconds, autoOffMinutes: state.autoOffMinutes }, { retain: true });
-      await appendLog({ type: "settings", message: `Motion cooldown set to ${state.motionCooldownSeconds}s` });
-      await editSettings(chatId, messageId, "⚙ Settings updated", state);
-      break;
-    case CALLBACKS.COOLDOWN_DEC:
-      state = await setState({ motionCooldownSeconds: Math.max(5, state.motionCooldownSeconds - 5) });
-      await mqttPublish(TOPICS.settingsState, { motionCooldownSeconds: state.motionCooldownSeconds, autoOffMinutes: state.autoOffMinutes }, { retain: true });
-      await appendLog({ type: "settings", message: `Motion cooldown set to ${state.motionCooldownSeconds}s` });
-      await editSettings(chatId, messageId, "⚙ Settings updated", state);
-      break;
-    case CALLBACKS.RESTART:
-      await publish(TOPICS.restart, { restart: true, source: "telegram" });
-      await appendLog({ type: "device", message: "Device restart command sent" });
-      await editDashboard(chatId, messageId, "🔄 Restart command sent.");
-      break;
-    case CALLBACKS.BACK_MAIN:
-      await editDashboard(chatId, messageId, statusText(state));
-      break;
-    default:
-      await answerCallback(query.id, "Unknown action");
-      return;
-  }
-
-  await answerCallback(query.id, "Done");
+  await handleAllowedCommand(chatId, command);
 }
 
-export default async (request) => {
-  try {
-    if (request.method !== "POST") {
-      return new Response("Method Not Allowed", { status: 405 });
-    }
-    const body = await request.json().catch(() => ({}));
-
-    if (body.message?.text === "/start") {
-      const userId = body.message.from?.id;
-      if (!isTelegramAdmin(userId)) {
-        return new Response("ok", { status: 200 });
-      }
-      const state = await getState();
-      await sendDashboard(body.message.chat.id, statusText(state));
-      return new Response("ok", { status: 200 });
-    }
-
-    if (body.callback_query) {
-      await handleCallback(body.callback_query);
-      return new Response("ok", { status: 200 });
-    }
-
-    if (body.message?.text === "/status") {
-      const userId = body.message.from?.id;
-      if (!isTelegramAdmin(userId)) {
-        return new Response("ok", { status: 200 });
-      }
-      const state = await getState();
-      await sendAlert(statusText(state), body.message.chat.id);
-      return new Response("ok", { status: 200 });
-    }
-
-    return new Response("ok", { status: 200 });
-  } catch (err) {
-    console.error("telegram-webhook error", err);
-    // 200 qaytarish shart — 500 bo'lsa Telegram webhook ni qayta-qayta chaqiradi
-    return new Response("ok", { status: 200 });
+export default async (request, context = {}) => {
+  if (request.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
   }
+
+  if (!verifyTelegramSecret(request.headers)) {
+    return new Response("unauthorized", { status: 401 });
+  }
+
+  try {
+    const update = await request.json();
+    const work = processUpdate(update || {}).catch((err) => {
+      console.error("telegram-webhook handled error", err?.message || err);
+    });
+
+    if (typeof context.waitUntil === "function") {
+      context.waitUntil(work);
+    } else {
+      await work;
+    }
+  } catch (err) {
+    console.error("telegram-webhook handled error", err?.message || err);
+  }
+
+  return new Response("ok", { status: 200 });
 };

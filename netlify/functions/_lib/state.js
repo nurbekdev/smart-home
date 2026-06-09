@@ -4,16 +4,18 @@ import { DEFAULTS } from "./constants.js";
 const store = () => getStore("iot-state");
 
 const DEFAULT_STATE = {
+  deviceId: DEFAULTS.deviceId,
   lightOn: false,
-  armed: DEFAULTS.armed,
-  nightModeOnly: DEFAULTS.nightModeOnly,
-  autoOffEnabled: true,
-  autoOffMinutes: DEFAULTS.autoOffMinutes,
-  motionCooldownSeconds: DEFAULTS.motionCooldownSeconds,
   online: false,
   lastSeenAt: null,
-  lastMotionAt: null,
+  lastStatusAt: null,
+  lastCommandAt: null,
+  lastCommand: null,
   lastLatencyMs: null,
+  ip: null,
+  rssi: null,
+  uptimeMs: null,
+  firmware: null,
   updatedAt: null
 };
 

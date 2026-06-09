@@ -1,27 +1,46 @@
 async function load() {
-  const res = await fetch("/api/status");
-  const data = await res.json();
+  const grid = document.getElementById("grid");
+  const logsEl = document.getElementById("logs");
+
+  let data;
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    data = await res.json();
+  } catch {
+    grid.innerHTML = `<div class="item error"><strong>Status</strong><br/>Unavailable</div>`;
+    logsEl.innerHTML = "";
+    return;
+  }
+
   const state = data.state || {};
   const logs = data.logs || [];
 
   const rows = [
+    ["Device", state.deviceId || "device-1"],
     ["Online", state.online ? "YES" : "NO"],
-    ["Light", state.lightOn ? "ON" : "OFF"],
-    ["Armed", state.armed ? "YES" : "NO"],
-    ["Night Mode", state.nightModeOnly ? "YES" : "NO"],
+    ["Relay", state.lightOn ? "ON" : "OFF"],
     ["Last Seen", state.lastSeenAt || "-"],
-    ["Last Motion", state.lastMotionAt || "-"],
-    ["Latency", `${state.lastLatencyMs ?? "-"} ms`],
-    ["Cooldown", `${state.motionCooldownSeconds ?? "-"} s`]
+    ["Last Status", state.lastStatusAt || "-"],
+    ["Last Command", state.lastCommand || "-"],
+    ["MQTT Latency", `${state.lastLatencyMs ?? "-"} ms`],
+    ["IP", state.ip || "-"],
+    ["RSSI", state.rssi ?? "-"]
   ];
 
-  const grid = document.getElementById("grid");
   grid.innerHTML = rows
-    .map(([k, v]) => `<div class="item"><strong>${k}</strong><br/>${v}</div>`)
+    .map(([k, v]) => `<div class="item"><strong>${escapeHtml(k)}</strong><br/>${escapeHtml(String(v))}</div>`)
     .join("");
 
-  const logsEl = document.getElementById("logs");
-  logsEl.innerHTML = logs.map((l) => `<li>[${l.at}] ${l.message}</li>`).join("");
+  logsEl.innerHTML = logs
+    .map((l) => `<li>[${escapeHtml(l.at || "-")}] ${escapeHtml(l.message || "")}</li>`)
+    .join("");
+}
+
+function escapeHtml(value) {
+  return value.replace(/[&<>"']/g, (char) => {
+    const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+    return map[char];
+  });
 }
 
 load();

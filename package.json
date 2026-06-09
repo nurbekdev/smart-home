@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "netlify dev",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "check:functions": "node --check netlify/functions/telegram-webhook.js && node --check netlify/functions/set-webhook.js && node --check netlify/functions/hivemq-ingest.js && node --check netlify/functions/status.js && node --check netlify/functions/health.js"
   },
   "dependencies": {
     "@netlify/blobs": "^9.0.0",

@@ -1,21 +1,28 @@
-function parseAdminIds() {
-  const raw = process.env.TELEGRAM_ADMIN_IDS || "";
-  return raw
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
+function timingSafeEqualString(a = "", b = "") {
+  if (a.length === 0 || b.length === 0 || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
-export function isTelegramAdmin(userId) {
-  const admins = parseAdminIds();
-  return admins.includes(String(userId));
+export function isAllowedChat(chatId) {
+  return String(chatId || "") === String(process.env.ALLOWED_CHAT_ID || "").trim();
+}
+
+export function verifyTelegramSecret(headers) {
+  const configured = process.env.TELEGRAM_SECRET_TOKEN || "";
+  const received =
+    typeof headers.get === "function"
+      ? headers.get("x-telegram-bot-api-secret-token")
+      : headers["x-telegram-bot-api-secret-token"];
+  return timingSafeEqualString(String(received || ""), configured);
 }
 
 export function verifyIngestSecret(headers) {
-  const configured = process.env.HIVEMQ_INGEST_SECRET || "";
+  const configured = process.env.HIVEMQ_INGEST_SECRET || process.env.TELEGRAM_SECRET_TOKEN || "";
   const received =
-    headers["x-ingest-secret"] ||
-    headers["X-Ingest-Secret"] ||
-    headers["x-ingest-Secret"];
-  return configured.length > 0 && received === configured;
+    typeof headers.get === "function" ? headers.get("x-ingest-secret") : headers["x-ingest-secret"];
+  return timingSafeEqualString(String(received || ""), configured);
 }

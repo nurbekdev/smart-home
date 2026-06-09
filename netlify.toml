@@ -2,6 +2,9 @@
   publish = "dashboard"
   functions = "netlify/functions"
 
+[build.environment]
+  NODE_VERSION = "20"
+
 [[redirects]]
   from = "/api/status"
   to = "/.netlify/functions/status"

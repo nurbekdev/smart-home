@@ -1,7 +1,6 @@
 import { TOPICS } from "./_lib/constants.js";
 import { verifyIngestSecret } from "./_lib/security.js";
-import { appendLog, getState, setState } from "./_lib/state.js";
-import { sendAlert } from "./_lib/telegram.js";
+import { appendLog, setState } from "./_lib/state.js";
 
 function parseBody(raw) {
   try {
@@ -18,61 +17,56 @@ function extractMessage(payload) {
   return {};
 }
 
+function parseMessagePayload(payload) {
+  if (typeof payload !== "string") return payload || {};
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
+
 export default async (request) => {
   try {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
-    const headersObj = {
-      "x-ingest-secret": request.headers.get("x-ingest-secret"),
-      "X-Ingest-Secret": request.headers.get("X-Ingest-Secret")
-    };
-    if (!verifyIngestSecret(headersObj)) {
+    if (!verifyIngestSecret(request.headers)) {
       return new Response("unauthorized", { status: 401 });
     }
 
     const payload = parseBody(await request.text());
     const msg = extractMessage(payload);
     const topic = msg.topic;
-    const data = typeof msg.payload === "string" ? JSON.parse(msg.payload) : msg.payload || {};
+    const data = parseMessagePayload(msg.payload);
     const now = new Date().toISOString();
 
-    if (!topic) return new Response("ignored", { status: 200 });
+    if (topic !== TOPICS.status) return new Response("ignored", { status: 200 });
+    if (!data) return new Response("ignored", { status: 200 });
 
-    if (topic === TOPICS.motion && data.motion === true) {
-      const state = await getState();
-      const cooldown = Number(state.motionCooldownSeconds || 15);
-      const last = state.lastMotionAt ? Date.parse(state.lastMotionAt) : 0;
-      if (Date.now() - last >= cooldown * 1000) {
-        await setState({ lastMotionAt: now, lastSeenAt: now, online: true, lightOn: true });
-        const timeStr = new Date(now).toLocaleString("uz-UZ", {
-          timeZone: "Asia/Tashkent",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit"
-        });
-        await appendLog({ type: "motion", message: `Harakat aniqlandi — ${timeStr}` });
-        if (state.armed) {
-          await sendAlert(`🚨 Harakat aniqlandi!\n🕐 Vaqt: ${timeStr}`);
-        }
-      }
-    } else if (topic === TOPICS.lightState) {
-      await setState({ lightOn: Boolean(data.on), lastSeenAt: now, online: true });
-      await appendLog({ type: "light", message: `Light state -> ${data.on ? "ON" : "OFF"}` });
-    } else if (topic === TOPICS.status || topic === TOPICS.heartbeat) {
-      await setState({
-        online: data.online !== false,
-        lastSeenAt: now
-      });
+    const patch = {
+      online: data.online !== false,
+      lastSeenAt: now,
+      lastStatusAt: now,
+      ip: data.ip || null,
+      rssi: typeof data.rssi === "number" ? data.rssi : null,
+      uptimeMs: typeof data.uptimeMs === "number" ? data.uptimeMs : null,
+      firmware: data.firmware || null
+    };
+
+    if (typeof data.relay === "string") {
+      patch.lightOn = data.relay === "on";
+    } else if (typeof data.lightOn === "boolean") {
+      patch.lightOn = data.lightOn;
     }
+
+    await setState(patch);
+    await appendLog({ type: "device", message: `Status update: ${patch.online ? "online" : "offline"}` });
 
     return new Response("ok", { status: 200 });
   } catch (err) {
     console.error("hivemq-ingest error", err);
-    return new Response("internal error", { status: 500 });
+    return new Response("ok", { status: 200 });
   }
 };
