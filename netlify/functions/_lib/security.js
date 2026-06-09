@@ -8,11 +8,22 @@ function timingSafeEqualString(a = "", b = "") {
 }
 
 export function isAllowedChat(chatId) {
-  return String(chatId || "") === String(process.env.ALLOWED_CHAT_ID || "").trim();
+  const allowed = [
+    process.env.ALLOWED_CHAT_ID,
+    process.env.TELEGRAM_DEFAULT_CHAT_ID,
+    ...(process.env.TELEGRAM_ADMIN_IDS || "").split(",")
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return allowed.includes(String(chatId || ""));
+}
+
+export function getTelegramSecret() {
+  return process.env.TELEGRAM_SECRET_TOKEN || process.env.HIVEMQ_INGEST_SECRET || "";
 }
 
 export function verifyTelegramSecret(headers) {
-  const configured = process.env.TELEGRAM_SECRET_TOKEN || "";
+  const configured = getTelegramSecret();
   const received =
     typeof headers.get === "function"
       ? headers.get("x-telegram-bot-api-secret-token")

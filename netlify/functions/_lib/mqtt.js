@@ -2,8 +2,24 @@ import mqtt from "mqtt";
 
 function getUrl() {
   const url = (process.env.MQTT_URL || "").trim();
-  if (!url) throw new Error("MQTT_URL is not configured");
-  return url;
+  if (url) return url;
+
+  let host = (process.env.HIVEMQ_HOST || "").trim();
+  host = host.replace(/^wss?:\/\//i, "").replace(/^https?:\/\//i, "");
+  host = host.split("/")[0] || "";
+  if (host.includes(":")) host = host.split(":")[0];
+  if (!host) throw new Error("MQTT_URL or HIVEMQ_HOST is not configured");
+
+  const port = process.env.HIVEMQ_PORT || "8884";
+  return `wss://${host}:${port}/mqtt`;
+}
+
+function getUsername() {
+  return process.env.MQTT_USER || process.env.HIVEMQ_USERNAME;
+}
+
+function getPassword() {
+  return process.env.MQTT_PASS || process.env.HIVEMQ_PASSWORD;
 }
 
 function createClientId() {
@@ -17,8 +33,8 @@ export async function mqttPublish(topic, payload, options = {}) {
     let settled = false;
     let failTimeout;
     const client = mqtt.connect(getUrl(), {
-      username: process.env.MQTT_USER,
-      password: process.env.MQTT_PASS,
+      username: getUsername(),
+      password: getPassword(),
       clientId: createClientId(),
       protocolVersion: 4,
       connectTimeout: Number(process.env.MQTT_CONNECT_TIMEOUT_MS || 8000),

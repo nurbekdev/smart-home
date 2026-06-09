@@ -1,9 +1,20 @@
 import { telegramCall } from "./_lib/telegram.js";
+import { getTelegramSecret } from "./_lib/security.js";
+
+function getWebhookUrl() {
+  if (process.env.TELEGRAM_WEBHOOK_URL) return process.env.TELEGRAM_WEBHOOK_URL;
+  if (process.env.SITE_BASE_URL) {
+    return `${process.env.SITE_BASE_URL.replace(/\/$/, "")}/.netlify/functions/telegram-webhook`;
+  }
+  return "";
+}
 
 function missingEnv() {
-  return ["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_URL", "TELEGRAM_SECRET_TOKEN"].filter(
-    (name) => !process.env[name]
-  );
+  const missing = [];
+  if (!process.env.TELEGRAM_BOT_TOKEN) missing.push("TELEGRAM_BOT_TOKEN");
+  if (!getWebhookUrl()) missing.push("TELEGRAM_WEBHOOK_URL or SITE_BASE_URL");
+  if (!getTelegramSecret()) missing.push("TELEGRAM_SECRET_TOKEN or HIVEMQ_INGEST_SECRET");
+  return missing;
 }
 
 export default async () => {
@@ -17,8 +28,8 @@ export default async () => {
 
   try {
     const telegram = await telegramCall("setWebhook", {
-      url: process.env.TELEGRAM_WEBHOOK_URL,
-      secret_token: process.env.TELEGRAM_SECRET_TOKEN,
+      url: getWebhookUrl(),
+      secret_token: getTelegramSecret(),
       drop_pending_updates: true,
       allowed_updates: ["message", "callback_query"]
     });
