@@ -210,6 +210,7 @@ void flushIngestIfPending() {
 
 void handleCommand(char* topic, byte* payload, unsigned int length) {
   if (strcmp(topic, MQTT_COMMAND_TOPIC) != 0) return;
+  if (length == 0) return;
 
   Serial.printf("MQTT command [%s] len=%u: ", topic, length);
   for (unsigned int i = 0; i < length; i++) Serial.print((char)payload[i]);
