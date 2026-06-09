@@ -8,6 +8,10 @@ function timingSafeEqualString(a = "", b = "") {
 }
 
 export function isAllowedChat(chatId) {
+  return getAllowedChatIds().includes(String(chatId || ""));
+}
+
+export function getAllowedChatIds() {
   const allowed = [
     process.env.ALLOWED_CHAT_ID,
     process.env.TELEGRAM_DEFAULT_CHAT_ID,
@@ -15,7 +19,7 @@ export function isAllowedChat(chatId) {
   ]
     .map((value) => String(value || "").trim())
     .filter(Boolean);
-  return allowed.includes(String(chatId || ""));
+  return allowed;
 }
 
 export function getTelegramSecret() {

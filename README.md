@@ -26,6 +26,7 @@ Set these in Netlify Site configuration:
 | `MQTT_PASS` | MQTT password |
 | `MQTT_COMMAND_TOPIC` | Defaults to `elshodlampa/device-1/cmd` |
 | `MQTT_STATUS_TOPIC` | Defaults to `elshodlampa/device-1/status` |
+| `MQTT_MOTION_TOPIC` | Defaults to `elshodlampa/device-1/motion` |
 
 Optional:
 
@@ -80,6 +81,7 @@ Unknown commands receive a clear help message. Chats other than `ALLOWED_CHAT_ID
 | --- | --- | --- |
 | `elshodlampa/device-1/cmd` | Netlify -> ESP8266 | Command JSON from Telegram |
 | `elshodlampa/device-1/status` | ESP8266 -> broker/Netlify | Retained status JSON |
+| `elshodlampa/device-1/motion` | ESP8266 -> broker/Netlify | Motion event JSON |
 
 The ESP8266 also publishes LWT offline status to `elshodlampa/device-1/status`.
 
@@ -95,6 +97,8 @@ Install PlatformIO dependencies from `firmware/platformio.ini`, then create a pr
 #define MQTT_PORT 8883
 #define MQTT_USER "your-mqtt-user"
 #define MQTT_PASS "your-mqtt-password"
+#define NETLIFY_INGEST_HOST "smarthome4.netlify.app"
+#define NETLIFY_INGEST_SECRET "same-as-HIVEMQ_INGEST_SECRET"
 ```
 
 Upload:
@@ -120,5 +124,5 @@ The static dashboard calls only `/api/status`. It does not contain Telegram toke
 | MQTT publish fails | Check `MQTT_URL` format, username/password, HiveMQ access rules, and TLS/WebSocket port |
 | ESP8266 offline | Check serial monitor, Wi-Fi is 2.4 GHz, MQTT host/port, and retained status topic |
 | `/status` is stale | Confirm ESP publishes `elshodlampa/device-1/status` and broker HTTP integration posts to `hivemq-ingest` |
+| Motion notification does not arrive | Confirm PIR is on D5/GPIO14 and `NETLIFY_INGEST_SECRET` in firmware matches Netlify ingest secret |
 | Netlify function error | Check env vars in `/api/status`; it reports booleans only, never secret values |
-

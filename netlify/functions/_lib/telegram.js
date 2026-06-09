@@ -1,14 +1,17 @@
 const BOT_API = () =>
   `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
-function commandKeyboard() {
+export function controlKeyboard() {
   return {
     inline_keyboard: [
       [
-        { text: "ON", callback_data: "/on" },
-        { text: "OFF", callback_data: "/off" }
+        { text: "Lampani yoqish", callback_data: "/on" },
+        { text: "Lampani o'chirish", callback_data: "/off" }
       ],
-      [{ text: "Status", callback_data: "/status" }]
+      [
+        { text: "Statusni yangilash", callback_data: "/status" },
+        { text: "Yordam", callback_data: "/help" }
+      ]
     ]
   };
 }
@@ -33,12 +36,23 @@ export async function sendMessage(chatId, text, extra = {}) {
   return telegramCall("sendMessage", {
     chat_id: chatId,
     text,
+    disable_web_page_preview: true,
     ...extra
   });
 }
 
-export async function sendHelp(chatId, text) {
-  return sendMessage(chatId, text, { reply_markup: commandKeyboard() });
+export async function sendPanel(chatId, text) {
+  return sendMessage(chatId, text, { reply_markup: controlKeyboard() });
+}
+
+export async function editPanel(chatId, messageId, text) {
+  return telegramCall("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    disable_web_page_preview: true,
+    reply_markup: controlKeyboard()
+  });
 }
 
 export async function answerCallback(id, text = "OK") {

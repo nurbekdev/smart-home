@@ -11,6 +11,7 @@ const DEFAULT_STATE = {
   lastStatusAt: null,
   lastCommandAt: null,
   lastCommand: null,
+  lastMotionAt: null,
   lastLatencyMs: null,
   ip: null,
   rssi: null,

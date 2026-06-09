@@ -14,7 +14,8 @@ export default async () => {
     mqttUser: Boolean(process.env.MQTT_USER || process.env.HIVEMQ_USERNAME),
     mqttPass: Boolean(process.env.MQTT_PASS || process.env.HIVEMQ_PASSWORD),
     mqttCommandTopic: process.env.MQTT_COMMAND_TOPIC || "elshodlampa/device-1/cmd",
-    mqttStatusTopic: process.env.MQTT_STATUS_TOPIC || "elshodlampa/device-1/status"
+    mqttStatusTopic: process.env.MQTT_STATUS_TOPIC || "elshodlampa/device-1/status",
+    mqttMotionTopic: process.env.MQTT_MOTION_TOPIC || "elshodlampa/device-1/motion"
   };
   return new Response(
     JSON.stringify({

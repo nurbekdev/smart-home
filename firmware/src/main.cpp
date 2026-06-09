@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <WiFiClientSecureBearSSL.h>
@@ -44,6 +45,24 @@
 #define MQTT_STATUS_TOPIC "elshodlampa/device-1/status"
 #endif
 
+#ifndef MQTT_MOTION_TOPIC
+#define MQTT_MOTION_TOPIC "elshodlampa/device-1/motion"
+#endif
+
+#ifndef NETLIFY_INGEST_HOST
+#define NETLIFY_INGEST_HOST ""
+#endif
+
+#ifndef NETLIFY_INGEST_PATH
+#define NETLIFY_INGEST_PATH "/.netlify/functions/hivemq-ingest"
+#endif
+
+#ifndef NETLIFY_INGEST_SECRET
+#define NETLIFY_INGEST_SECRET ""
+#endif
+
+// NodeMCU D5. Change this if your PIR sensor is wired to another pin.
+static const uint8_t PIR_PIN = 14;
 // NodeMCU D6. Change this only if your relay is wired to another pin.
 static const uint8_t RELAY_PIN = 12;
 static const bool RELAY_ACTIVE_LOW = true;
@@ -51,6 +70,9 @@ static const bool RELAY_ACTIVE_LOW = true;
 static const unsigned long WIFI_RETRY_MS = 10000;
 static const unsigned long MQTT_RETRY_MS = 5000;
 static const unsigned long STATUS_INTERVAL_MS = 30000;
+static const unsigned long PIR_SAMPLE_MS = 80;
+static const unsigned long PIR_DEBOUNCE_MS = 200;
+static const unsigned long MOTION_COOLDOWN_MS = 30000;
 
 BearSSL::WiFiClientSecure wifiSecure;
 PubSubClient mqttClient(wifiSecure);
@@ -59,6 +81,14 @@ bool relayOn = false;
 unsigned long lastWifiAttemptAt = 0;
 unsigned long lastMqttAttemptAt = 0;
 unsigned long lastStatusAt = 0;
+unsigned long lastPirSampleAt = 0;
+unsigned long pirChangedAt = 0;
+unsigned long lastMotionAt = 0;
+bool pirLastRead = false;
+bool pirStable = false;
+bool ingestPending = false;
+char ingestTopic[72];
+char ingestPayload[256];
 
 void setRelay(bool on) {
   relayOn = on;
@@ -83,6 +113,77 @@ void publishStatus(bool online) {
   char payload[256];
   const size_t length = serializeJson(doc, payload, sizeof(payload));
   mqttClient.publish(MQTT_STATUS_TOPIC, reinterpret_cast<const uint8_t*>(payload), length, true);
+}
+
+void publishMotion() {
+  if (!mqttClient.connected()) return;
+
+  JsonDocument doc;
+  doc["deviceId"] = DEVICE_ID;
+  doc["motion"] = true;
+  doc["relay"] = relayOn ? "on" : "off";
+  doc["rssi"] = WiFi.RSSI();
+  doc["uptimeMs"] = millis();
+
+  char payload[256];
+  const size_t length = serializeJson(doc, payload, sizeof(payload));
+  mqttClient.publish(MQTT_MOTION_TOPIC, reinterpret_cast<const uint8_t*>(payload), length, false);
+
+  strncpy(ingestTopic, MQTT_MOTION_TOPIC, sizeof(ingestTopic) - 1);
+  ingestTopic[sizeof(ingestTopic) - 1] = '\0';
+  strncpy(ingestPayload, payload, sizeof(ingestPayload) - 1);
+  ingestPayload[sizeof(ingestPayload) - 1] = '\0';
+  ingestPending = true;
+
+  Serial.println(F("Motion published"));
+}
+
+void flushIngestIfPending() {
+  if (!ingestPending || WiFi.status() != WL_CONNECTED) return;
+  if (strlen(NETLIFY_INGEST_HOST) == 0 || strlen(NETLIFY_INGEST_SECRET) == 0) {
+    ingestPending = false;
+    return;
+  }
+
+  char topicCopy[sizeof(ingestTopic)];
+  char payloadCopy[sizeof(ingestPayload)];
+  strncpy(topicCopy, ingestTopic, sizeof(topicCopy) - 1);
+  topicCopy[sizeof(topicCopy) - 1] = '\0';
+  strncpy(payloadCopy, ingestPayload, sizeof(payloadCopy) - 1);
+  payloadCopy[sizeof(payloadCopy) - 1] = '\0';
+  ingestPending = false;
+
+  if (mqttClient.connected()) {
+    mqttClient.disconnect();
+    delay(30);
+  }
+
+  JsonDocument payloadDoc;
+  if (deserializeJson(payloadDoc, payloadCopy)) return;
+
+  JsonDocument envelope;
+  envelope["topic"] = topicCopy;
+  envelope["payload"] = payloadDoc.as<JsonObject>();
+
+  String body;
+  serializeJson(envelope, body);
+
+  BearSSL::WiFiClientSecure httpClient;
+  httpClient.setInsecure();
+  HTTPClient http;
+  http.setTimeout(5000);
+  const String url = String("https://") + NETLIFY_INGEST_HOST + NETLIFY_INGEST_PATH;
+
+  if (!http.begin(httpClient, url)) {
+    Serial.println(F("Ingest begin failed"));
+    return;
+  }
+
+  http.addHeader(F("Content-Type"), F("application/json"));
+  http.addHeader(F("x-ingest-secret"), NETLIFY_INGEST_SECRET);
+  const int code = http.POST(body);
+  Serial.printf("Motion ingest HTTP %d\n", code);
+  http.end();
 }
 
 void handleCommand(char* topic, byte* payload, unsigned int length) {
@@ -165,6 +266,30 @@ void connectMqttNonBlocking() {
   }
 }
 
+void handleMotionNonBlocking() {
+  if (WiFi.status() != WL_CONNECTED || !mqttClient.connected()) return;
+
+  const unsigned long now = millis();
+  if (now - lastPirSampleAt < PIR_SAMPLE_MS) return;
+  lastPirSampleAt = now;
+
+  const bool raw = digitalRead(PIR_PIN) == HIGH;
+  if (raw != pirLastRead) {
+    pirLastRead = raw;
+    pirChangedAt = now;
+  }
+
+  if (now - pirChangedAt < PIR_DEBOUNCE_MS || raw == pirStable) return;
+  pirStable = raw;
+
+  if (!pirStable || now - lastMotionAt < MOTION_COOLDOWN_MS) return;
+  lastMotionAt = now;
+
+  Serial.println(F("Motion detected"));
+  publishMotion();
+  publishStatus(true);
+}
+
 void setup() {
   Serial.begin(115200);
   delay(200);
@@ -172,6 +297,7 @@ void setup() {
   Serial.println(F("Elshodlampa ESP8266 boot"));
 
   pinMode(RELAY_PIN, OUTPUT);
+  pinMode(PIR_PIN, INPUT);
   setRelay(false);
 
   wifiSecure.setInsecure();
@@ -192,6 +318,8 @@ void loop() {
   }
 
   mqttClient.loop();
+  handleMotionNonBlocking();
+  flushIngestIfPending();
 
   const unsigned long now = millis();
   if (mqttClient.connected() && now - lastStatusAt >= STATUS_INTERVAL_MS) {

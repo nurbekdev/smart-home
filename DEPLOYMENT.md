@@ -75,6 +75,7 @@ Topic:
 
 ```text
 elshodlampa/device-1/status
+elshodlampa/device-1/motion
 ```
 
 Payload example:
@@ -102,6 +103,8 @@ Create ignored private credentials:
 #define MQTT_PORT 8883
 #define MQTT_USER "your-mqtt-user"
 #define MQTT_PASS "your-mqtt-password"
+#define NETLIFY_INGEST_HOST "smarthome4.netlify.app"
+#define NETLIFY_INGEST_SECRET "same-as-HIVEMQ_INGEST_SECRET"
 ```
 
 Upload:
@@ -131,3 +134,4 @@ pio device monitor
 | MQTT connect fails on ESP8266 | Use raw host plus `MQTT_PORT 8883`; check Wi-Fi and credentials |
 | ESP8266 offline | Watch serial monitor and confirm LWT/status topic in broker |
 | Dashboard does not update | Wire broker HTTP webhook to `hivemq-ingest` or call `/status` to update command state |
+| Motion alert does not arrive | Check PIR wiring on D5/GPIO14 and firmware `NETLIFY_INGEST_SECRET` |

@@ -1,7 +1,7 @@
 import { TOPICS } from "./_lib/constants.js";
 import { mqttPublish } from "./_lib/mqtt.js";
 import { appendLog, getState, setState } from "./_lib/state.js";
-import { answerCallback, sendHelp, sendMessage } from "./_lib/telegram.js";
+import { answerCallback, editPanel, sendMessage, sendPanel } from "./_lib/telegram.js";
 import { isAllowedChat, verifyTelegramSecret } from "./_lib/security.js";
 
 function commandFromUpdate(update) {
@@ -16,31 +16,52 @@ function chatIdFromUpdate(update) {
   return update.message?.chat?.id || update.callback_query?.message?.chat?.id;
 }
 
-function helpText() {
-  return [
-    "Elshodlampa bot tayyor.",
-    "",
-    "Buyruqlar:",
-    "/on - lampani yoqish",
-    "/off - lampani o'chirish",
-    "/status - device statusini so'rash",
-    "/help - yordam"
-  ].join("\n");
+function messageIdFromUpdate(update) {
+  return update.callback_query?.message?.message_id;
 }
 
-function formatStatus(state) {
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("uz-UZ", {
+    timeZone: "Asia/Tashkent",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(date);
+}
+
+function labelOnline(state) {
+  return state.online ? "Online" : "Offline";
+}
+
+function labelRelay(state) {
+  return state.lightOn ? "Yoqilgan" : "O'chirilgan";
+}
+
+function panelText(state, notice = "") {
   return [
-    "Elshodlampa status",
+    "Elshodlampa boshqaruv paneli",
+    "",
+    notice ? `Natija: ${notice}` : "Kerakli amalni tanlang.",
+    "",
+    `Holat: ${labelOnline(state)}`,
+    `Lampa: ${labelRelay(state)}`,
     `Device: ${state.deviceId || "device-1"}`,
-    `Online: ${state.online ? "YES" : "NO"}`,
-    `Relay: ${state.lightOn ? "ON" : "OFF"}`,
-    `Last seen: ${state.lastSeenAt || "-"}`,
-    `Last status: ${state.lastStatusAt || "-"}`,
-    `Last command: ${state.lastCommand || "-"}`,
-    `MQTT latency: ${state.lastLatencyMs ?? "-"} ms`,
-    `IP: ${state.ip || "-"}`,
-    `RSSI: ${state.rssi ?? "-"}`
-  ].join("\n");
+    `Oxirgi aloqa: ${formatDateTime(state.lastSeenAt)}`,
+    `Oxirgi harakat: ${formatDateTime(state.lastMotionAt)}`,
+    `Oxirgi buyruq: ${state.lastCommand ? `/${state.lastCommand}` : "-"}`,
+    `MQTT kechikish: ${state.lastLatencyMs ?? "-"} ms`,
+    `Wi-Fi signal: ${state.rssi ?? "-"} dBm`,
+    "",
+    "Buttonlardan foydalaning yoki /on, /off, /status yuboring."
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
 }
 
 async function safeTelegram(action) {
@@ -68,31 +89,51 @@ async function publishCommand(command, patch) {
   return state;
 }
 
-async function handleAllowedCommand(chatId, command) {
+async function replyWithPanel(update, chatId, text) {
+  const messageId = messageIdFromUpdate(update);
+  if (messageId) {
+    try {
+      await editPanel(chatId, messageId, text);
+      return;
+    } catch (err) {
+      const message = err?.message || "";
+      if (!message.includes("message is not modified")) {
+        console.error("edit panel failed", message || err);
+      }
+    }
+  }
+  await sendPanel(chatId, text);
+}
+
+async function handleAllowedCommand(update, chatId, command) {
   switch (command) {
     case "/start":
-    case "/help":
-      await sendHelp(chatId, helpText());
+    case "/help": {
+      const state = await getState();
+      await replyWithPanel(update, chatId, panelText(state));
       return;
+    }
     case "/on": {
       try {
         const state = await publishCommand("on", { lightOn: true });
-        await sendMessage(chatId, `OK. Lampa yoqish buyrug'i yuborildi.\n\n${formatStatus(state)}`);
+        await replyWithPanel(update, chatId, panelText(state, "Lampani yoqish buyrug'i yuborildi."));
       } catch (err) {
         console.error("on mqtt publish failed", err?.message || err);
         await appendLog({ type: "mqtt", message: "ON command publish failed" });
-        await sendMessage(chatId, "MQTT xatosi: lampa yoqish buyrug'i yuborilmadi. Broker sozlamalarini tekshiring.");
+        const state = await getState();
+        await replyWithPanel(update, chatId, panelText(state, "MQTT xatosi. Broker sozlamalarini tekshiring."));
       }
       return;
     }
     case "/off": {
       try {
         const state = await publishCommand("off", { lightOn: false });
-        await sendMessage(chatId, `OK. Lampa o'chirish buyrug'i yuborildi.\n\n${formatStatus(state)}`);
+        await replyWithPanel(update, chatId, panelText(state, "Lampani o'chirish buyrug'i yuborildi."));
       } catch (err) {
         console.error("off mqtt publish failed", err?.message || err);
         await appendLog({ type: "mqtt", message: "OFF command publish failed" });
-        await sendMessage(chatId, "MQTT xatosi: lampa o'chirish buyrug'i yuborilmadi. Broker sozlamalarini tekshiring.");
+        const state = await getState();
+        await replyWithPanel(update, chatId, panelText(state, "MQTT xatosi. Broker sozlamalarini tekshiring."));
       }
       return;
     }
@@ -104,11 +145,11 @@ async function handleAllowedCommand(chatId, command) {
         console.error("status mqtt publish failed", err?.message || err);
         await appendLog({ type: "mqtt", message: "Status request publish failed" });
       }
-      await sendMessage(chatId, formatStatus(state));
+      await replyWithPanel(update, chatId, panelText(state, "Status so'rovi yuborildi."));
       return;
     }
     default:
-      await sendHelp(chatId, `Noma'lum buyruq: ${command || "-"}\n\n${helpText()}`);
+      await replyWithPanel(update, chatId, panelText(await getState(), `Noma'lum buyruq: ${command || "-"}`));
   }
 }
 
@@ -126,7 +167,7 @@ async function processUpdate(update) {
     return;
   }
 
-  await handleAllowedCommand(chatId, command);
+  await handleAllowedCommand(update, chatId, command);
 }
 
 export default async (request, context = {}) => {
