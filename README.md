@@ -27,6 +27,7 @@ Set these in Netlify Site configuration:
 | `MQTT_COMMAND_TOPIC` | Defaults to `elshodlampa/device-1/cmd` |
 | `MQTT_STATUS_TOPIC` | Defaults to `elshodlampa/device-1/status` |
 | `MQTT_MOTION_TOPIC` | Defaults to `elshodlampa/device-1/motion` |
+| `TELEGRAM_MOTION_STICKER_ID` | Optional Telegram sticker `file_id` sent before motion alerts |
 
 Optional:
 
@@ -110,6 +111,7 @@ pio device monitor
 ```
 
 Default relay pin is NodeMCU `D6` (`GPIO12`) and active-low. Change `RELAY_PIN` or `RELAY_ACTIVE_LOW` in `firmware/src/main.cpp` only if your hardware is wired differently.
+Motion on NodeMCU `D5` (`GPIO14`) turns the relay on locally even if the internet is down. The default motion auto-off is 120 seconds.
 
 ## Dashboard
 

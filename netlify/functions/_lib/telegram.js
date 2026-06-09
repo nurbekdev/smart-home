@@ -5,12 +5,12 @@ export function controlKeyboard() {
   return {
     inline_keyboard: [
       [
-        { text: "Relay ON", callback_data: "/on" },
-        { text: "Relay OFF", callback_data: "/off" }
+        { text: "💡 Relay ON", callback_data: "/on" },
+        { text: "🌙 Relay OFF", callback_data: "/off" }
       ],
       [
-        { text: "Statusni yangilash", callback_data: "/status" },
-        { text: "Yordam", callback_data: "/help" }
+        { text: "📊 Status", callback_data: "/status" },
+        { text: "ℹ️ Yordam", callback_data: "/help" }
       ]
     ]
   };
@@ -38,6 +38,14 @@ export async function sendMessage(chatId, text, extra = {}) {
     text,
     disable_web_page_preview: true,
     ...extra
+  });
+}
+
+export async function sendSticker(chatId, sticker) {
+  if (!sticker) return null;
+  return telegramCall("sendSticker", {
+    chat_id: chatId,
+    sticker
   });
 }
 

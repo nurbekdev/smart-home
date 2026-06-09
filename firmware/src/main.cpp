@@ -73,10 +73,19 @@
 #define RELAY_ACTIVE_LOW 1
 #endif
 
+#ifndef MOTION_TURNS_RELAY_ON
+#define MOTION_TURNS_RELAY_ON 1
+#endif
+
+#ifndef MOTION_AUTO_OFF_MS
+#define MOTION_AUTO_OFF_MS 120000
+#endif
+
 // Defaults: PIR on NodeMCU D5/GPIO14, relay on D6/GPIO12.
 static const uint8_t PIR_PIN_NUMBER = PIR_PIN;
 static const uint8_t RELAY_PIN_NUMBER = RELAY_PIN;
 static const bool RELAY_IS_ACTIVE_LOW = RELAY_ACTIVE_LOW == 1;
+static const bool MOTION_RELAY_ENABLED = MOTION_TURNS_RELAY_ON == 1;
 
 static const unsigned long WIFI_RETRY_MS = 10000;
 static const unsigned long MQTT_RETRY_MS = 5000;
@@ -95,6 +104,7 @@ unsigned long lastStatusAt = 0;
 unsigned long lastPirSampleAt = 0;
 unsigned long pirChangedAt = 0;
 unsigned long lastMotionAt = 0;
+unsigned long relayAutoOffAt = 0;
 bool pirLastRead = false;
 bool pirStable = false;
 bool ingestPending = false;
@@ -126,6 +136,7 @@ void publishStatus(bool online) {
   doc["firmware"] = "smart-home-1.1.0";
   doc["relayPin"] = RELAY_PIN_NUMBER;
   doc["relayActiveLow"] = RELAY_IS_ACTIVE_LOW;
+  doc["motionRelayEnabled"] = MOTION_RELAY_ENABLED;
 
   char payload[256];
   const size_t length = serializeJson(doc, payload, sizeof(payload));
@@ -139,6 +150,7 @@ void publishMotion() {
   doc["deviceId"] = DEVICE_ID;
   doc["motion"] = true;
   doc["relay"] = relayOn ? "on" : "off";
+  doc["relayTriggered"] = MOTION_RELAY_ENABLED;
   doc["rssi"] = WiFi.RSSI();
   doc["uptimeMs"] = millis();
 
@@ -302,8 +314,6 @@ void connectMqttNonBlocking() {
 }
 
 void handleMotionNonBlocking() {
-  if (WiFi.status() != WL_CONNECTED || !mqttClient.connected()) return;
-
   const unsigned long now = millis();
   if (now - lastPirSampleAt < PIR_SAMPLE_MS) return;
   lastPirSampleAt = now;
@@ -321,8 +331,16 @@ void handleMotionNonBlocking() {
   lastMotionAt = now;
 
   Serial.println(F("Motion detected"));
-  publishMotion();
-  publishStatus(true);
+  if (MOTION_RELAY_ENABLED) {
+    setRelay(true);
+    relayAutoOffAt = now + MOTION_AUTO_OFF_MS;
+    Serial.printf("Motion relay ON; auto-off in %lu ms\n", (unsigned long)MOTION_AUTO_OFF_MS);
+  }
+
+  if (mqttClient.connected()) {
+    publishMotion();
+    publishStatus(true);
+  }
 }
 
 void setup() {
@@ -333,6 +351,10 @@ void setup() {
   Serial.printf("Relay config: GPIO%d activeLow=%s\n",
                 RELAY_PIN_NUMBER,
                 RELAY_IS_ACTIVE_LOW ? "true" : "false");
+  Serial.printf("Motion relay: enabled=%s autoOffMs=%lu PIR GPIO%d\n",
+                MOTION_RELAY_ENABLED ? "true" : "false",
+                (unsigned long)MOTION_AUTO_OFF_MS,
+                PIR_PIN_NUMBER);
 
   pinMode(RELAY_PIN_NUMBER, OUTPUT);
   pinMode(PIR_PIN_NUMBER, INPUT);
@@ -360,6 +382,13 @@ void loop() {
   flushIngestIfPending();
 
   const unsigned long now = millis();
+  if (relayOn && relayAutoOffAt > 0 && now >= relayAutoOffAt) {
+    relayAutoOffAt = 0;
+    setRelay(false);
+    Serial.println(F("Motion auto-off"));
+    if (mqttClient.connected()) publishStatus(true);
+  }
+
   if (mqttClient.connected() && now - lastStatusAt >= STATUS_INTERVAL_MS) {
     lastStatusAt = now;
     publishStatus(true);

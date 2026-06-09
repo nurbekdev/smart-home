@@ -36,29 +36,30 @@ function formatDateTime(value) {
 }
 
 function labelOnline(state) {
-  return state.online ? "Online" : "Offline";
+  return state.online ? "🟢 Online" : "🔴 Offline";
 }
 
 function labelRelay(state) {
-  return state.lightOn ? "Yoqilgan" : "O'chirilgan";
+  return state.lightOn ? "💡 Yoqilgan" : "🌙 O'chirilgan";
 }
 
 function panelText(state, notice = "") {
   return [
-    "Smart Home boshqaruv paneli",
+    "🏠 Smart Home",
+    "Boshqaruv paneli",
     "",
-    notice ? `Natija: ${notice}` : "Kerakli amalni tanlang.",
+    notice ? `✅ ${notice}` : "Quyidagi tugmalar orqali boshqaring.",
     "",
-    `Holat: ${labelOnline(state)}`,
-    `Relay: ${labelRelay(state)}`,
-    `Device: ${state.deviceId || "device-1"}`,
-    `Oxirgi aloqa: ${formatDateTime(state.lastSeenAt)}`,
-    `Oxirgi harakat: ${formatDateTime(state.lastMotionAt)}`,
-    `Oxirgi buyruq: ${state.lastCommand ? `/${state.lastCommand}` : "-"}`,
-    `MQTT kechikish: ${state.lastLatencyMs ?? "-"} ms`,
-    `Wi-Fi signal: ${state.rssi ?? "-"} dBm`,
+    `📡 Holat: ${labelOnline(state)}`,
+    `🔌 Relay: ${labelRelay(state)}`,
+    `🧩 Device: ${state.deviceId || "device-1"}`,
+    `🕒 Oxirgi aloqa: ${formatDateTime(state.lastSeenAt)}`,
+    `🚶 Oxirgi harakat: ${formatDateTime(state.lastMotionAt)}`,
+    `⌨️ Oxirgi buyruq: ${state.lastCommand ? `/${state.lastCommand}` : "-"}`,
+    `⚡ MQTT: ${state.lastLatencyMs ?? "-"} ms`,
+    `📶 Wi-Fi: ${state.rssi ?? "-"} dBm`,
     "",
-    "Buttonlardan foydalaning yoki /on, /off, /status yuboring."
+    "Buyruqlar: /on /off /status"
   ]
     .filter((line) => line !== null)
     .join("\n");
